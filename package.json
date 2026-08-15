@@ -1,0 +1,16 @@
+{
+  "name": "js-hosting-bot",
+  "version": "2.0.0",
+  "main": "bot_js.js",
+  "scripts": {
+    "start": "node bot_js.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.61.0",
+    "adm-zip": "^0.5.10",
+    "moment": "^2.29.4"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
