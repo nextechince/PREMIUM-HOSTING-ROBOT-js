@@ -11,9 +11,16 @@ const TOKEN = process.env.TOKEN || 'YOUR_JS_BOT_TOKEN';
 const ADMIN_ID = 7158115683;
 const CHANNEL_ID = '@MRANONIMOUS01';
 
+// --- FORCE JOIN CHANNELS ---
+// Add your channels here: { name: "Channel Name", link: "https://t.me/username" }
+const FORCE_JOIN_CHANNELS = [
+    { name: "ᴍᴀɪɴ ᴄʜᴀɴɴᴇʟ", link: "https://t.me/MRANONIMOUS01" },
+    { name: "ᴘʀᴇᴍɪᴜᴍ ʜᴏsᴛɪɴɢ ᴜᴘᴅᴀᴛᴇs", link: "https://t.me/PREMIUM_BOT_HOSTING_UPDATE" },
+    { name: "ʟᴏɴᴇʀ ᴅᴏᴍᴀɪɴ", link: "https://t.me/lordtarrificterritory" }
+];
+
 const bot = new TelegramBot(TOKEN, { polling: true });
 
-// FIXED: Use absolute paths
 const BASE_DIR = __dirname;
 const DB_FILE = path.join(BASE_DIR, 'users_data.json');
 const SETTINGS_FILE = path.join(BASE_DIR, 'bot_settings.json');
@@ -53,7 +60,8 @@ function loadSettings() {
         maintenance: false,
         welcome_video: null,
         bot_username: null,
-        new_user_notify: true
+        new_user_notify: true,
+        force_join: true
     };
 }
 
@@ -94,6 +102,46 @@ function errorText(title, content) {
 
 function infoText(title, content) {
     return premiumText(`ℹ️ ${title}`, content, '📌', 'ɴᴇᴇᴅ ʜᴇʟᴘ? ᴄᴏɴᴛᴀᴄᴛ sᴜᴘᴘᴏʀᴛ');
+}
+
+// --- Force Join Check ---
+async function checkForceJoin(userId) {
+    if (!settings.force_join) return true;
+    
+    try {
+        for (const channel of FORCE_JOIN_CHANNELS) {
+            try {
+                const chatMember = await bot.getChatMember(channel.link.replace('https://t.me/', '@'), userId);
+                if (chatMember.status === 'left' || chatMember.status === 'kicked') {
+                    return false;
+                }
+            } catch (e) {
+                // Channel might be private or bot not admin
+                continue;
+            }
+        }
+        return true;
+    } catch (e) {
+        return true;
+    }
+}
+
+function getForceJoinKeyboard() {
+    const markup = {
+        inline_keyboard: []
+    };
+    
+    for (const channel of FORCE_JOIN_CHANNELS) {
+        markup.inline_keyboard.push([
+            { text: `📢 ${channel.name}`, url: channel.link }
+        ]);
+    }
+    
+    markup.inline_keyboard.push([
+        { text: '✅ ɪ ᴊᴏɪɴᴇᴅ', callback_data: 'check_join' }
+    ]);
+    
+    return markup;
 }
 
 // --- Admin Notification ---
@@ -149,7 +197,6 @@ function installNodeDependencies(dirPath, userId, fileName) {
 
 function runUserFile(filePath, userId, fileName) {
     return new Promise((resolve) => {
-        // FIXED: Use absolute path
         const absPath = path.resolve(filePath);
         
         if (!fs.existsSync(absPath)) {
@@ -160,10 +207,9 @@ function runUserFile(filePath, userId, fileName) {
         
         const ext = path.extname(fileName).toLowerCase();
         
-        // JS ONLY - Only accept .js files
         if (ext !== '.js') {
             bot.sendMessage(userId, errorText('Wrong Bot', 
-                'This bot only deploys <b>JavaScript (.js)</b> files.\nUse the Python bot for Python files.'), { parse_mode: 'HTML' });
+                'This bot only deploys <b>JavaScript (.js)</b> files.'), { parse_mode: 'HTML' });
             resolve({ success: false, status: 'Wrong bot - Use Python bot' });
             return;
         }
@@ -171,7 +217,6 @@ function runUserFile(filePath, userId, fileName) {
         const logFile = path.join(LOGS_DIR, `${userId}_${fileName.replace(/\./g, '_')}.log`);
         fs.writeFileSync(logFile, `=== Bot Started: ${moment().format('YYYY-MM-DD HH:mm:ss')} ===\nUser ID: ${userId}\nFile: ${fileName}\nPath: ${absPath}\n${'='.repeat(50)}\n\n`);
         
-        // FIXED: Use absolute path
         const process = spawn('node', [absPath], {
             cwd: path.dirname(absPath),
             stdio: ['pipe', 'pipe', 'pipe']
@@ -283,6 +328,7 @@ function mainKeyboard(userId) {
 function adminKeyboard() {
     const maintText = settings.maintenance ? '🔴 Maintenance ON' : '🟢 Maintenance OFF';
     const notifyText = settings.new_user_notify ? '🔔 Notify ON' : '🔕 Notify OFF';
+    const forceText = settings.force_join ? '🔒 Force Join ON' : '🔓 Force Join OFF';
     
     return {
         inline_keyboard: [
@@ -293,6 +339,8 @@ function adminKeyboard() {
             [{ text: '💾 Backup', callback_data: 'adm_backup' }],
             [{ text: maintText, callback_data: 'adm_toggle_maint' }],
             [{ text: notifyText, callback_data: 'adm_toggle_notify' }],
+            [{ text: forceText, callback_data: 'adm_toggle_force' }],
+            [{ text: '📋 Manage Channels', callback_data: 'adm_manage_channels' }],
             [{ text: '🖥 Server Stats', callback_data: 'adm_stats' }],
             [{ text: '🧹 Clean Bots', callback_data: 'adm_clean' }],
             [{ text: '📊 System Info', callback_data: 'adm_system' }]
@@ -307,6 +355,18 @@ bot.onText(/\/start/, async (msg) => {
     
     if (settings.maintenance && uid !== String(ADMIN_ID)) {
         return bot.sendMessage(chatId, premiumText('🔧 Maintenance', 'Bot is under maintenance.', '🔄'), { parse_mode: 'HTML' });
+    }
+    
+    // Force Join Check
+    if (settings.force_join && uid !== String(ADMIN_ID)) {
+        const joined = await checkForceJoin(uid);
+        if (!joined) {
+            return bot.sendMessage(chatId, premiumText('📢 ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟs',
+                '⚠️ <b>You must join these channels to use this bot!</b>\n\n👇 Click the buttons below and join all channels, then click "I Joined"', '🔒'), {
+                parse_mode: 'HTML',
+                reply_markup: getForceJoinKeyboard()
+            });
+        }
     }
     
     const isNew = !usersDB[uid];
@@ -375,11 +435,252 @@ bot.onText(/\/start/, async (msg) => {
     });
 });
 
-bot.onText(/✦ Deploy JS/, (msg) => {
+// --- Force Join Check Callback ---
+bot.on('callback_query', async (callbackQuery) => {
+    const chatId = callbackQuery.message.chat.id;
+    const msgId = callbackQuery.message.message_id;
+    const uid = String(callbackQuery.from.id);
+    const data = callbackQuery.data;
+    
+    if (data === 'check_join') {
+        const joined = await checkForceJoin(uid);
+        if (joined) {
+            bot.answerCallbackQuery(callbackQuery.id, '✅ All channels joined!');
+            bot.deleteMessage(chatId, msgId);
+            // Send welcome message
+            const welcomeText = `
+<b>🟢 ᴊᴀᴠᴀsᴄʀɪᴘᴛ ᴘʀᴇᴍɪᴜᴍ ᴄʟᴏᴜᴅ ʜᴏsᴛɪɴɢ ✦</b>
+<b>🌐 24/7 ᴊs ᴄʟᴏᴜᴅ ᴅᴇᴘʟᴏʏᴍᴇɴᴛ</b>
+
+━━━━━━━━━━━━━━━━━━━━
+
+<b>👋 ᴡᴇʟᴄᴏᴍᴇ! You're verified!</b>
+
+💡 ᴜsᴇ ʙᴜᴛᴛᴏɴs ʙᴇʟᴏᴡ!`;
+            bot.sendMessage(chatId, premiumText('✅ ᴠᴇʀɪғɪᴇᴅ', welcomeText, '🟢'), {
+                parse_mode: 'HTML',
+                reply_markup: mainKeyboard(uid)
+            });
+        } else {
+            bot.answerCallbackQuery(callbackQuery.id, '❌ Please join all channels first!', { show_alert: true });
+        }
+        return;
+    }
+    
+    // --- ADMIN CALLBACKS ---
+    if (uid === String(ADMIN_ID)) {
+        if (data === 'adm_toggle_maint') {
+            settings.maintenance = !settings.maintenance;
+            saveSettings(settings);
+            bot.answerCallbackQuery(callbackQuery.id, `Maintenance: ${settings.maintenance ? 'ON' : 'OFF'}`);
+            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
+        } else if (data === 'adm_toggle_notify') {
+            settings.new_user_notify = !settings.new_user_notify;
+            saveSettings(settings);
+            bot.answerCallbackQuery(callbackQuery.id, `Notifications: ${settings.new_user_notify ? 'ON' : 'OFF'}`);
+            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
+        } else if (data === 'adm_toggle_force') {
+            settings.force_join = !settings.force_join;
+            saveSettings(settings);
+            bot.answerCallbackQuery(callbackQuery.id, `Force Join: ${settings.force_join ? 'ON' : 'OFF'}`);
+            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
+        } else if (data === 'adm_manage_channels') {
+            let channelList = '📋 <b>Current Channels:</b>\n\n';
+            FORCE_JOIN_CHANNELS.forEach((ch, i) => {
+                channelList += `${i+1}. ${ch.name}\n   ${ch.link}\n\n`;
+            });
+            bot.sendMessage(chatId, premiumText('📋 ᴍᴀɴᴀɢᴇ ᴄʜᴀɴɴᴇʟs',
+                `${channelList}\n\n<code>Edit FORCE_JOIN_CHANNELS in the code to add/remove channels.</code>`, '📢'), { parse_mode: 'HTML' });
+        } else if (data === 'adm_broadcast') {
+            bot.sendMessage(chatId, premiumText('📢 Broadcast', 'Send your message below:', '📨'), { parse_mode: 'HTML' });
+            bot.once('text', (msg) => {
+                const text = msg.text;
+                let count = 0;
+                for (const uid of Object.keys(usersDB)) {
+                    try {
+                        bot.sendMessage(parseInt(uid), premiumText('📢 Announcement', text, '📨'), { parse_mode: 'HTML' });
+                        count++;
+                    } catch (e) {}
+                }
+                bot.sendMessage(chatId, premiumText('✅ Broadcast Complete', `Sent to ${count} users`, '📨'), { parse_mode: 'HTML' });
+            });
+        } else if (data === 'adm_set_video') {
+            bot.sendMessage(chatId, premiumText('🎥 Set Video', 'Send the video file:', '📹'), { parse_mode: 'HTML' });
+            bot.once('video', (msg) => {
+                settings.welcome_video = msg.video.file_id;
+                saveSettings(settings);
+                bot.sendMessage(chatId, successText('✅ Video Set', 'Welcome video updated!'), { parse_mode: 'HTML' });
+            });
+        } else if (data === 'adm_del_video') {
+            settings.welcome_video = null;
+            saveSettings(settings);
+            bot.answerCallbackQuery(callbackQuery.id, '✅ Video removed!');
+            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
+        } else if (data === 'adm_add_pts') {
+            bot.sendMessage(chatId, premiumText('➕ Add Points', 'Send User ID:', '👤'), { parse_mode: 'HTML' });
+            bot.once('text', (msg) => {
+                const target = msg.text;
+                bot.sendMessage(chatId, premiumText('💰 Amount', 'Enter points:', '💎'), { parse_mode: 'HTML' });
+                bot.once('text', (msg2) => {
+                    try {
+                        const points = parseInt(msg2.text);
+                        if (usersDB[target]) {
+                            usersDB[target].points += points;
+                            saveDB(usersDB);
+                            bot.sendMessage(chatId, successText('✅ Points Added', 
+                                `User: ${target}\nAdded: +${points}\nNew Balance: ${usersDB[target].points}`), { parse_mode: 'HTML' });
+                        } else {
+                            bot.sendMessage(chatId, errorText('User Not Found', 'Invalid User ID'), { parse_mode: 'HTML' });
+                        }
+                    } catch (e) {
+                        bot.sendMessage(chatId, errorText('Error', 'Invalid input'), { parse_mode: 'HTML' });
+                    }
+                });
+            });
+        } else if (data === 'adm_global_add_pts') {
+            bot.sendMessage(chatId, premiumText('🌍 Global Add Points', 'Enter points to add to ALL users:', '💎'), { parse_mode: 'HTML' });
+            bot.once('text', (msg) => {
+                try {
+                    const points = parseInt(msg.text);
+                    if (points <= 0) {
+                        return bot.sendMessage(chatId, errorText('Invalid', 'Enter positive number'), { parse_mode: 'HTML' });
+                    }
+                    let count = 0;
+                    for (const uid of Object.keys(usersDB)) {
+                        usersDB[uid].points += points;
+                        count++;
+                    }
+                    saveDB(usersDB);
+                    bot.sendMessage(chatId, successText('🌍 Global Points Added',
+                        `Added: +${points} to ${count} users\nTotal Distributed: ${points * count}`), { parse_mode: 'HTML' });
+                } catch (e) {
+                    bot.sendMessage(chatId, errorText('Error', 'Invalid input'), { parse_mode: 'HTML' });
+                }
+            });
+        } else if (data === 'adm_stats') {
+            const cpu = os.loadavg()[0];
+            const mem = os.freemem() / os.totalmem() * 100;
+            bot.sendMessage(chatId, premiumText('🖥 Server Stats',
+                `CPU: ${cpu.toFixed(2)}%\nRAM: ${(100 - mem).toFixed(2)}%\nBots: ${Object.keys(runningProcesses).length}\nUsers: ${Object.keys(usersDB).length}`, '📊'), { parse_mode: 'HTML' });
+        } else if (data === 'adm_backup') {
+            const backupFile = `backup_${moment().format('YYYYMMDD_HHmmss')}.json`;
+            fs.copyFileSync(DB_FILE, backupFile);
+            bot.sendDocument(chatId, backupFile, { caption: '💾 Database Backup' });
+            fs.unlinkSync(backupFile);
+            bot.answerCallbackQuery(callbackQuery.id, '✅ Backup created!');
+        } else if (data === 'adm_clean') {
+            let cleaned = 0;
+            for (const [fPath, info] of Object.entries(runningProcesses)) {
+                if (info.process.exitCode !== null) {
+                    delete runningProcesses[fPath];
+                    cleaned++;
+                }
+            }
+            bot.answerCallbackQuery(callbackQuery.id, `🧹 Cleaned ${cleaned} dead processes!`);
+        } else if (data === 'adm_system') {
+            bot.sendMessage(chatId, premiumText('🔧 System Info',
+                `Node: ${process.version}\nPlatform: ${os.platform()}\nDB Size: ${fs.statSync(DB_FILE).size / 1024}KB`, '⚙️'), { parse_mode: 'HTML' });
+        }
+    }
+    
+    // --- File Management Callbacks ---
+    if (data.startsWith('viewlog_')) {
+        const parts = data.split('_');
+        const fName = parts.slice(1, -1).join('_');
+        const targetUid = parts[parts.length - 1];
+        const logFile = path.join(LOGS_DIR, `${targetUid}_${fName.replace(/\./g, '_')}.log`);
+        
+        if (fs.existsSync(logFile)) {
+            const content = fs.readFileSync(logFile, 'utf8').slice(-2000);
+            bot.sendMessage(chatId, premiumText(`📋 Logs: ${fName}`, `<code>${content}</code>`, '📜'), { parse_mode: 'HTML' });
+        } else {
+            bot.answerCallbackQuery(callbackQuery.id, 'No log file found.');
+        }
+        return;
+    }
+    
+    if (data.startsWith('run_') || data.startsWith('stop_') || data.startsWith('down_') || data.startsWith('del_') || data.startsWith('logs_')) {
+        const parts = data.split('_');
+        const action = parts[0];
+        const fName = parts.slice(1, -1).join('_');
+        const targetUid = parts[parts.length - 1];
+        const fPath = path.join(DEPLOY_DIR, `${targetUid}_${fName}`);
+        const absPath = path.resolve(fPath);
+        
+        if (action === 'stop') {
+            if (stopBot(absPath)) {
+                bot.answerCallbackQuery(callbackQuery.id, '⏹ Bot stopped!');
+                bot.editMessageReplyMarkup(null, { chat_id: chatId, message_id: msgId });
+            } else {
+                bot.answerCallbackQuery(callbackQuery.id, 'Failed to stop bot.');
+            }
+        } else if (action === 'run') {
+            const result = await runUserFile(absPath, parseInt(targetUid), fName);
+            if (result.success) {
+                bot.answerCallbackQuery(callbackQuery.id, '▶️ Bot started!');
+                bot.editMessageReplyMarkup(null, { chat_id: chatId, message_id: msgId });
+            } else {
+                bot.answerCallbackQuery(callbackQuery.id, `Failed: ${result.status.slice(0, 50)}`);
+            }
+        } else if (action === 'down') {
+            if (fs.existsSync(absPath)) {
+                bot.sendDocument(chatId, absPath, { caption: `📥 ${fName}` });
+            } else {
+                bot.answerCallbackQuery(callbackQuery.id, 'File not found!');
+            }
+        } else if (action === 'del') {
+            try {
+                if (runningProcesses[absPath]) stopBot(absPath);
+                if (fs.existsSync(absPath)) {
+                    const stat = fs.statSync(absPath);
+                    if (stat.isDirectory()) {
+                        fs.rmSync(absPath, { recursive: true });
+                    } else {
+                        fs.unlinkSync(absPath);
+                    }
+                }
+                if (usersDB[targetUid] && usersDB[targetUid].files) {
+                    usersDB[targetUid].files = usersDB[targetUid].files.filter(f => f !== fName);
+                    saveDB(usersDB);
+                }
+                const logFile = path.join(LOGS_DIR, `${targetUid}_${fName.replace(/\./g, '_')}.log`);
+                if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+                bot.deleteMessage(chatId, msgId);
+                bot.answerCallbackQuery(callbackQuery.id, '🗑️ Deleted!');
+            } catch (e) {
+                bot.answerCallbackQuery(callbackQuery.id, `Error: ${e.message.slice(0, 50)}`);
+            }
+        } else if (action === 'logs') {
+            const logFile = path.join(LOGS_DIR, `${targetUid}_${fName.replace(/\./g, '_')}.log`);
+            if (fs.existsSync(logFile)) {
+                const content = fs.readFileSync(logFile, 'utf8').slice(-2000);
+                bot.sendMessage(chatId, premiumText(`📋 Logs: ${fName}`, `<code>${content}</code>`, '📜'), { parse_mode: 'HTML' });
+            } else {
+                bot.answerCallbackQuery(callbackQuery.id, 'No log file found.');
+            }
+        }
+        return;
+    }
+});
+
+// --- Deploy Handler ---
+bot.onText(/✦ Deploy JS/, async (msg) => {
     const chatId = msg.chat.id;
     const uid = String(msg.from.id);
     const points = usersDB[uid]?.points || 0;
     const cost = settings.hosting_cost;
+    
+    // Force Join Check
+    if (settings.force_join && uid !== String(ADMIN_ID)) {
+        const joined = await checkForceJoin(uid);
+        if (!joined) {
+            return bot.sendMessage(chatId, premiumText('📢 ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟs',
+                '⚠️ <b>You must join these channels to deploy!</b>\n\n👇 Click the buttons below and join all channels, then click "I Joined"', '🔒'), {
+                parse_mode: 'HTML',
+                reply_markup: getForceJoinKeyboard()
+            });
+        }
+    }
     
     if (points < cost) {
         return bot.sendMessage(chatId, premiumText('💎 Insufficient Points',
@@ -387,7 +688,7 @@ bot.onText(/✦ Deploy JS/, (msg) => {
     }
     
     bot.sendMessage(chatId, premiumText('📤 Deploy JS Bot',
-        `📂 Supported: .js, .zip\n💰 Cost: ${cost} pts\n💎 Balance: ${points} pts\n\n📌 <b>JavaScript only!</b>`, '🟢'), { 
+        `📂 Supported: .js, .zip\n💰 Cost: ${cost} pts\n💎 Balance: ${points} pts\n\n📌 <b>JavaScript only!</b>\n\n⚠️ <b>Important:</b> Upload the file directly, DO NOT forward from another chat!`, '🟢'), { 
         parse_mode: 'HTML' 
     }).then(() => {
         bot.once('document', async (docMsg) => {
@@ -396,6 +697,7 @@ bot.onText(/✦ Deploy JS/, (msg) => {
     });
 });
 
+// --- Process Upload (FIXED) ---
 async function processUpload(msg) {
     const chatId = msg.chat.id;
     const uid = String(msg.from.id);
@@ -404,15 +706,20 @@ async function processUpload(msg) {
         return bot.sendMessage(chatId, errorText('No File', 'Please send a valid file.'), { parse_mode: 'HTML' });
     }
     
+    // Check file size (max 20MB)
+    if (msg.document.file_size > 20 * 1024 * 1024) {
+        return bot.sendMessage(chatId, errorText('File Too Large', 
+            'Maximum file size is 20MB. Please upload a smaller file.'), { parse_mode: 'HTML' });
+    }
+    
     const fileName = msg.document.file_name;
-    // FIXED: Use absolute path
     const filePath = path.join(DEPLOY_DIR, `${uid}_${fileName}`);
     const absFilePath = path.resolve(filePath);
     
     console.log(`📥 Upload: ${fileName}`);
     console.log(`📁 Saving to: ${absFilePath}`);
+    console.log(`📊 File ID: ${msg.document.file_id}`);
     
-    // JS ONLY - Only accept .js and .zip
     const validExtensions = ['.js', '.zip'];
     if (!validExtensions.some(ext => fileName.toLowerCase().endsWith(ext))) {
         return bot.sendMessage(chatId, errorText('Wrong Format', 
@@ -423,45 +730,101 @@ async function processUpload(msg) {
         `📦 File: ${fileName}\n⏳ Status: Uploading...`, '⚙️'), { parse_mode: 'HTML' });
     
     try {
-        const file = await bot.getFile(msg.document.file_id);
-        const fileContent = await bot.downloadFile(file.file_path);
+        // Get file
+        let file;
+        try {
+            file = await bot.getFile(msg.document.file_id);
+        } catch (error) {
+            console.error('❌ Failed to get file:', error);
+            await bot.editMessageText(errorText('File Error', 
+                'Failed to get file from Telegram. Please upload the file directly (not forwarded).'), {
+                chat_id: chatId,
+                message_id: progMsg.message_id,
+                parse_mode: 'HTML'
+            });
+            return;
+        }
+        
+        // Download file
+        let fileContent;
+        try {
+            fileContent = await bot.downloadFile(file.file_path);
+        } catch (error) {
+            console.error('❌ Failed to download file:', error);
+            await bot.editMessageText(errorText('Download Error', 
+                'Failed to download file. Please upload the file directly (not forwarded).'), {
+                chat_id: chatId,
+                message_id: progMsg.message_id,
+                parse_mode: 'HTML'
+            });
+            return;
+        }
+        
+        // Save file
         fs.writeFileSync(absFilePath, fileContent);
         
         let finalPath = absFilePath;
         let finalName = fileName;
         
+        // Handle ZIP files
         if (fileName.endsWith('.zip')) {
             const extractDir = path.join(DEPLOY_DIR, `${uid}_${fileName.replace('.zip', '')}`);
             const absExtractDir = path.resolve(extractDir);
-            const zip = new AdmZip(absFilePath);
-            zip.extractAllTo(absExtractDir, true);
-            fs.unlinkSync(absFilePath);
+            
+            try {
+                const zip = new AdmZip(absFilePath);
+                zip.extractAllTo(absExtractDir, true);
+                fs.unlinkSync(absFilePath);
+            } catch (error) {
+                console.error('❌ Failed to extract ZIP:', error);
+                await bot.editMessageText(errorText('Invalid ZIP', 
+                    'The file is not a valid ZIP archive.'), {
+                    chat_id: chatId,
+                    message_id: progMsg.message_id,
+                    parse_mode: 'HTML'
+                });
+                return;
+            }
             
             let mainFile = null;
             let hasPy = false;
-            const walkDir = (dir) => {
-                const files = fs.readdirSync(dir);
-                for (const file of files) {
-                    const fullPath = path.join(dir, file);
-                    const stat = fs.statSync(fullPath);
-                    if (stat.isDirectory()) {
-                        walkDir(fullPath);
-                    } else if (file.endsWith('.py')) {
-                        hasPy = true;
-                    } else if (file.endsWith('.js')) {
-                        if (!mainFile) mainFile = fullPath;
+            try {
+                const walkDir = (dir) => {
+                    const files = fs.readdirSync(dir);
+                    for (const file of files) {
+                        const fullPath = path.join(dir, file);
+                        const stat = fs.statSync(fullPath);
+                        if (stat.isDirectory()) {
+                            walkDir(fullPath);
+                        } else if (file.endsWith('.py')) {
+                            hasPy = true;
+                        } else if (file.endsWith('.js')) {
+                            if (!mainFile) mainFile = fullPath;
+                        }
                     }
-                }
-            };
-            walkDir(absExtractDir);
+                };
+                walkDir(absExtractDir);
+            } catch (error) {
+                console.error('❌ Failed to walk directory:', error);
+            }
             
             if (hasPy && !mainFile) {
-                return bot.sendMessage(chatId, errorText('Wrong Format', 
-                    '❌ This archive contains only Python files!\nThis bot only deploys <b>JavaScript</b> bots.'), { parse_mode: 'HTML' });
+                await bot.editMessageText(errorText('Wrong Format', 
+                    '❌ This archive contains only Python files!\nThis bot only deploys <b>JavaScript</b> bots.'), {
+                    chat_id: chatId,
+                    message_id: progMsg.message_id,
+                    parse_mode: 'HTML'
+                });
+                return;
             }
             
             if (!mainFile) {
-                return bot.sendMessage(chatId, errorText('Invalid ZIP', 'No JavaScript (.js) file found.'), { parse_mode: 'HTML' });
+                await bot.editMessageText(errorText('Invalid ZIP', 'No JavaScript (.js) file found.'), {
+                    chat_id: chatId,
+                    message_id: progMsg.message_id,
+                    parse_mode: 'HTML'
+                });
+                return;
             }
             
             finalPath = path.resolve(mainFile);
@@ -469,19 +832,27 @@ async function processUpload(msg) {
             console.log(`📦 Extracted: ${finalPath}`);
         }
         
-        // Ensure it's a JavaScript file
         if (!finalName.endsWith('.js')) {
-            return bot.sendMessage(chatId, errorText('Wrong Format', 
-                '❌ This bot only deploys <b>JavaScript (.js)</b> files!'), { parse_mode: 'HTML' });
+            await bot.editMessageText(errorText('Wrong Format', 
+                '❌ This bot only deploys <b>JavaScript (.js)</b> files!'), {
+                chat_id: chatId,
+                message_id: progMsg.message_id,
+                parse_mode: 'HTML'
+            });
+            return;
         }
         
-        // Verify file exists
         if (!fs.existsSync(finalPath)) {
-            return bot.sendMessage(chatId, errorText('File Error', 
-                `File not found: ${finalPath}`), { parse_mode: 'HTML' });
+            await bot.editMessageText(errorText('File Error', 
+                `File not found: ${finalPath}`), {
+                chat_id: chatId,
+                message_id: progMsg.message_id,
+                parse_mode: 'HTML'
+            });
+            return;
         }
         
-        // Install Node dependencies
+        // Install dependencies
         await bot.editMessageText(premiumText('⏳ Processing...', 
             `📦 Installing Node.js dependencies...`, '⚙️'), {
             chat_id: chatId,
@@ -524,7 +895,7 @@ async function processUpload(msg) {
         }
         
     } catch (e) {
-        console.error(e);
+        console.error('❌ Deployment error:', e);
         await bot.editMessageText(errorText('Deployment Error', `❌ ${e.message}`), {
             chat_id: chatId,
             message_id: progMsg.message_id,
@@ -640,7 +1011,7 @@ bot.onText(/✦ Channel/, (msg) => {
 bot.onText(/✦ Support/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, premiumText('📞 Support Center',
-        `👤 Owner: @MRANONIMOUS01\n📢 Channel: ${CHANNEL_ID}\n\n💡 JS bot only!`, '💬'), { parse_mode: 'HTML' });
+        `👤 Owner: @P_bots_owner\n📢 Channel: ${CHANNEL_ID}\n\n💡 JS bot only!`, '💬'), { parse_mode: 'HTML' });
 });
 
 bot.onText(/✦ More Bots/, (msg) => {
@@ -663,10 +1034,6 @@ sᴛᴀᴛᴜs :  ᴏɴʟɪɴᴇ 🟢   ᴏғғʟɪɴᴇ 🔴
 
 ╭┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╮
  <a href="https://t.me/Premiun_Cloud_Hosting_Js_Robot">ᴘʀᴇᴍɪᴜᴍ ᴄʟᴏᴜᴅ ʜᴏsᴛɪɴɢ ┈ᴊs┈</a>  🟢
-╰┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╯
-
-╭┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╮
- <a href="https://t.me/PREMIUM_VPS_BOT_HOSTING_ROBOT">ᴘʀᴇᴍɪᴜᴍ ᴄʟᴏᴜᴅ ʜᴏsᴛɪɴɢ ʙᴏᴛs</a>  🟢
 ╰┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╯
 
 ═════════════════
@@ -745,196 +1112,6 @@ bot.onText(/✦ All Files/, (msg) => {
     
     if (!found) {
         bot.sendMessage(chatId, infoText('No Files', 'No deployed bots found.'), { parse_mode: 'HTML' });
-    }
-});
-
-// --- Callback Handler ---
-bot.on('callback_query', async (callbackQuery) => {
-    const chatId = callbackQuery.message.chat.id;
-    const msgId = callbackQuery.message.message_id;
-    const uid = String(callbackQuery.from.id);
-    const data = callbackQuery.data;
-    
-    if (data.startsWith('viewlog_')) {
-        const parts = data.split('_');
-        const fName = parts.slice(1, -1).join('_');
-        const targetUid = parts[parts.length - 1];
-        const logFile = path.join(LOGS_DIR, `${targetUid}_${fName.replace(/\./g, '_')}.log`);
-        
-        if (fs.existsSync(logFile)) {
-            const content = fs.readFileSync(logFile, 'utf8').slice(-2000);
-            bot.sendMessage(chatId, premiumText(`📋 Logs: ${fName}`, `<code>${content}</code>`, '📜'), { parse_mode: 'HTML' });
-        } else {
-            bot.answerCallbackQuery(callbackQuery.id, 'No log file found.');
-        }
-        return;
-    }
-    
-    if (data.startsWith('run_') || data.startsWith('stop_') || data.startsWith('down_') || data.startsWith('del_') || data.startsWith('logs_')) {
-        const parts = data.split('_');
-        const action = parts[0];
-        const fName = parts.slice(1, -1).join('_');
-        const targetUid = parts[parts.length - 1];
-        const fPath = path.join(DEPLOY_DIR, `${targetUid}_${fName}`);
-        const absPath = path.resolve(fPath);
-        
-        if (action === 'stop') {
-            if (stopBot(absPath)) {
-                bot.answerCallbackQuery(callbackQuery.id, '⏹ Bot stopped!');
-                bot.editMessageReplyMarkup(null, { chat_id: chatId, message_id: msgId });
-            } else {
-                bot.answerCallbackQuery(callbackQuery.id, 'Failed to stop bot.');
-            }
-        } else if (action === 'run') {
-            const result = await runUserFile(absPath, parseInt(targetUid), fName);
-            if (result.success) {
-                bot.answerCallbackQuery(callbackQuery.id, '▶️ Bot started!');
-                bot.editMessageReplyMarkup(null, { chat_id: chatId, message_id: msgId });
-            } else {
-                bot.answerCallbackQuery(callbackQuery.id, `Failed: ${result.status.slice(0, 50)}`);
-            }
-        } else if (action === 'down') {
-            if (fs.existsSync(absPath)) {
-                bot.sendDocument(chatId, absPath, { caption: `📥 ${fName}` });
-            } else {
-                bot.answerCallbackQuery(callbackQuery.id, 'File not found!');
-            }
-        } else if (action === 'del') {
-            try {
-                if (runningProcesses[absPath]) stopBot(absPath);
-                if (fs.existsSync(absPath)) {
-                    const stat = fs.statSync(absPath);
-                    if (stat.isDirectory()) {
-                        fs.rmSync(absPath, { recursive: true });
-                    } else {
-                        fs.unlinkSync(absPath);
-                    }
-                }
-                if (usersDB[targetUid] && usersDB[targetUid].files) {
-                    usersDB[targetUid].files = usersDB[targetUid].files.filter(f => f !== fName);
-                    saveDB(usersDB);
-                }
-                const logFile = path.join(LOGS_DIR, `${targetUid}_${fName.replace(/\./g, '_')}.log`);
-                if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
-                bot.deleteMessage(chatId, msgId);
-                bot.answerCallbackQuery(callbackQuery.id, '🗑️ Deleted!');
-            } catch (e) {
-                bot.answerCallbackQuery(callbackQuery.id, `Error: ${e.message.slice(0, 50)}`);
-            }
-        } else if (action === 'logs') {
-            const logFile = path.join(LOGS_DIR, `${targetUid}_${fName.replace(/\./g, '_')}.log`);
-            if (fs.existsSync(logFile)) {
-                const content = fs.readFileSync(logFile, 'utf8').slice(-2000);
-                bot.sendMessage(chatId, premiumText(`📋 Logs: ${fName}`, `<code>${content}</code>`, '📜'), { parse_mode: 'HTML' });
-            } else {
-                bot.answerCallbackQuery(callbackQuery.id, 'No log file found.');
-            }
-        }
-        return;
-    }
-    
-    // Admin functions
-    if (uid === String(ADMIN_ID)) {
-        if (data === 'adm_toggle_maint') {
-            settings.maintenance = !settings.maintenance;
-            saveSettings(settings);
-            bot.answerCallbackQuery(callbackQuery.id, `Maintenance: ${settings.maintenance ? 'ON' : 'OFF'}`);
-            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
-        } else if (data === 'adm_toggle_notify') {
-            settings.new_user_notify = !settings.new_user_notify;
-            saveSettings(settings);
-            bot.answerCallbackQuery(callbackQuery.id, `Notifications: ${settings.new_user_notify ? 'ON' : 'OFF'}`);
-            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
-        } else if (data === 'adm_broadcast') {
-            bot.sendMessage(chatId, premiumText('📢 Broadcast', 'Send your message below:', '📨'), { parse_mode: 'HTML' });
-            bot.once('text', (msg) => {
-                const text = msg.text;
-                let count = 0;
-                for (const uid of Object.keys(usersDB)) {
-                    try {
-                        bot.sendMessage(parseInt(uid), premiumText('📢 Announcement', text, '📨'), { parse_mode: 'HTML' });
-                        count++;
-                    } catch (e) {}
-                }
-                bot.sendMessage(chatId, premiumText('✅ Broadcast Complete', `Sent to ${count} users`, '📨'), { parse_mode: 'HTML' });
-            });
-        } else if (data === 'adm_set_video') {
-            bot.sendMessage(chatId, premiumText('🎥 Set Video', 'Send the video file:', '📹'), { parse_mode: 'HTML' });
-            bot.once('video', (msg) => {
-                settings.welcome_video = msg.video.file_id;
-                saveSettings(settings);
-                bot.sendMessage(chatId, successText('✅ Video Set', 'Welcome video updated!'), { parse_mode: 'HTML' });
-            });
-        } else if (data === 'adm_del_video') {
-            settings.welcome_video = null;
-            saveSettings(settings);
-            bot.answerCallbackQuery(callbackQuery.id, '✅ Video removed!');
-            bot.editMessageReplyMarkup(adminKeyboard(), { chat_id: chatId, message_id: msgId });
-        } else if (data === 'adm_add_pts') {
-            bot.sendMessage(chatId, premiumText('➕ Add Points', 'Send User ID:', '👤'), { parse_mode: 'HTML' });
-            bot.once('text', (msg) => {
-                const target = msg.text;
-                bot.sendMessage(chatId, premiumText('💰 Amount', 'Enter points:', '💎'), { parse_mode: 'HTML' });
-                bot.once('text', (msg2) => {
-                    try {
-                        const points = parseInt(msg2.text);
-                        if (usersDB[target]) {
-                            usersDB[target].points += points;
-                            saveDB(usersDB);
-                            bot.sendMessage(chatId, successText('✅ Points Added', 
-                                `User: ${target}\nAdded: +${points}\nNew Balance: ${usersDB[target].points}`), { parse_mode: 'HTML' });
-                        } else {
-                            bot.sendMessage(chatId, errorText('User Not Found', 'Invalid User ID'), { parse_mode: 'HTML' });
-                        }
-                    } catch (e) {
-                        bot.sendMessage(chatId, errorText('Error', 'Invalid input'), { parse_mode: 'HTML' });
-                    }
-                });
-            });
-        } else if (data === 'adm_global_add_pts') {
-            bot.sendMessage(chatId, premiumText('🌍 Global Add Points', 'Enter points to add to ALL users:', '💎'), { parse_mode: 'HTML' });
-            bot.once('text', (msg) => {
-                try {
-                    const points = parseInt(msg.text);
-                    if (points <= 0) {
-                        return bot.sendMessage(chatId, errorText('Invalid', 'Enter positive number'), { parse_mode: 'HTML' });
-                    }
-                    let count = 0;
-                    for (const uid of Object.keys(usersDB)) {
-                        usersDB[uid].points += points;
-                        count++;
-                    }
-                    saveDB(usersDB);
-                    bot.sendMessage(chatId, successText('🌍 Global Points Added',
-                        `Added: +${points} to ${count} users\nTotal Distributed: ${points * count}`), { parse_mode: 'HTML' });
-                } catch (e) {
-                    bot.sendMessage(chatId, errorText('Error', 'Invalid input'), { parse_mode: 'HTML' });
-                }
-            });
-        } else if (data === 'adm_stats') {
-            const cpu = os.loadavg()[0];
-            const mem = os.freemem() / os.totalmem() * 100;
-            bot.sendMessage(chatId, premiumText('🖥 Server Stats',
-                `CPU: ${cpu.toFixed(2)}%\nRAM: ${(100 - mem).toFixed(2)}%\nBots: ${Object.keys(runningProcesses).length}\nUsers: ${Object.keys(usersDB).length}`, '📊'), { parse_mode: 'HTML' });
-        } else if (data === 'adm_backup') {
-            const backupFile = `backup_${moment().format('YYYYMMDD_HHmmss')}.json`;
-            fs.copyFileSync(DB_FILE, backupFile);
-            bot.sendDocument(chatId, backupFile, { caption: '💾 Database Backup' });
-            fs.unlinkSync(backupFile);
-            bot.answerCallbackQuery(callbackQuery.id, '✅ Backup created!');
-        } else if (data === 'adm_clean') {
-            let cleaned = 0;
-            for (const [fPath, info] of Object.entries(runningProcesses)) {
-                if (info.process.exitCode !== null) {
-                    delete runningProcesses[fPath];
-                    cleaned++;
-                }
-            }
-            bot.answerCallbackQuery(callbackQuery.id, `🧹 Cleaned ${cleaned} dead processes!`);
-        } else if (data === 'adm_system') {
-            bot.sendMessage(chatId, premiumText('🔧 System Info',
-                `Node: ${process.version}\nPlatform: ${os.platform()}\nDB Size: ${fs.statSync(DB_FILE).size / 1024}KB`, '⚙️'), { parse_mode: 'HTML' });
-        }
     }
 });
 
