@@ -5,14 +5,14 @@ const { exec, spawn } = require('child_process');
 const os = require('os');
 const AdmZip = require('adm-zip');
 const moment = require('moment');
+const https = require('https');
 
 // --- Configuration ---
 const TOKEN = process.env.TOKEN || 'YOUR_JS_BOT_TOKEN';
 const ADMIN_ID = 7158115683;
 const CHANNEL_ID = '@MRANONIMOUS01';
 
-// --- FORCE JOIN CHANNELS ---
-// Add your channels here: { name: "Channel Name", link: "https://t.me/username" }
+// --- FORCE JOIN CHANNELS (WORKING) ---
 const FORCE_JOIN_CHANNELS = [
     { name: "ᴍᴀɪɴ ᴄʜᴀɴɴᴇʟ", link: "https://t.me/MRANONIMOUS01" },
     { name: "ᴘʀᴇᴍɪᴜᴍ ʜᴏsᴛɪɴɢ ᴜᴘᴅᴀᴛᴇs", link: "https://t.me/PREMIUM_BOT_HOSTING_UPDATE" },
@@ -104,43 +104,43 @@ function infoText(title, content) {
     return premiumText(`ℹ️ ${title}`, content, '📌', 'ɴᴇᴇᴅ ʜᴇʟᴘ? ᴄᴏɴᴛᴀᴄᴛ sᴜᴘᴘᴏʀᴛ');
 }
 
-// --- Force Join Check ---
+// --- Force Join Functions (FIXED) ---
 async function checkForceJoin(userId) {
     if (!settings.force_join) return true;
     
     try {
         for (const channel of FORCE_JOIN_CHANNELS) {
             try {
-                const chatMember = await bot.getChatMember(channel.link.replace('https://t.me/', '@'), userId);
+                // Extract username from link
+                const username = channel.link.replace('https://t.me/', '').replace('@', '');
+                const chatMember = await bot.getChatMember(`@${username}`, userId);
                 if (chatMember.status === 'left' || chatMember.status === 'kicked') {
+                    console.log(`❌ User ${userId} not in channel: ${username}`);
                     return false;
                 }
             } catch (e) {
-                // Channel might be private or bot not admin
+                console.log(`⚠️ Could not check channel ${channel.name}: ${e.message}`);
+                // If bot can't check, skip this channel
                 continue;
             }
         }
         return true;
     } catch (e) {
+        console.log(`⚠️ Force join check error: ${e.message}`);
         return true;
     }
 }
 
 function getForceJoinKeyboard() {
-    const markup = {
-        inline_keyboard: []
-    };
-    
+    const markup = { inline_keyboard: [] };
     for (const channel of FORCE_JOIN_CHANNELS) {
         markup.inline_keyboard.push([
             { text: `📢 ${channel.name}`, url: channel.link }
         ]);
     }
-    
     markup.inline_keyboard.push([
         { text: '✅ ɪ ᴊᴏɪɴᴇᴅ', callback_data: 'check_join' }
     ]);
-    
     return markup;
 }
 
@@ -311,16 +311,23 @@ async function announceDeployment(userId, fileName) {
     }
 }
 
-// --- Main Keyboard ---
+// --- Main Keyboard (FIXED - Shows Admin Panel for Admin) ---
 function mainKeyboard(userId) {
+    const keyboard = [
+        ['✦ Deploy JS', '✦ My Files'],
+        ['✦ Points', '✦ Stats'],
+        ['✦ Referral', '✦ Logs'],
+        ['✦ Channel', '✦ Support'],
+        ['✦ More Bots', '✦ Daily']
+    ];
+    
+    // FIXED: Add Admin Panel for admin user
+    if (String(userId) === String(ADMIN_ID)) {
+        keyboard.push(['✦ Admin Panel', '✦ All Files']);
+    }
+    
     return {
-        keyboard: [
-            ['✦ Deploy JS', '✦ My Files'],
-            ['✦ Points', '✦ Stats'],
-            ['✦ Referral', '✦ Logs'],
-            ['✦ Channel', '✦ Support'],
-            ['✦ More Bots', '✦ Daily']
-        ],
+        keyboard: keyboard,
         resize_keyboard: true
     };
 }
@@ -357,7 +364,7 @@ bot.onText(/\/start/, async (msg) => {
         return bot.sendMessage(chatId, premiumText('🔧 Maintenance', 'Bot is under maintenance.', '🔄'), { parse_mode: 'HTML' });
     }
     
-    // Force Join Check
+    // FORCE JOIN CHECK
     if (settings.force_join && uid !== String(ADMIN_ID)) {
         const joined = await checkForceJoin(uid);
         if (!joined) {
@@ -447,7 +454,6 @@ bot.on('callback_query', async (callbackQuery) => {
         if (joined) {
             bot.answerCallbackQuery(callbackQuery.id, '✅ All channels joined!');
             bot.deleteMessage(chatId, msgId);
-            // Send welcome message
             const welcomeText = `
 <b>🟢 ᴊᴀᴠᴀsᴄʀɪᴘᴛ ᴘʀᴇᴍɪᴜᴍ ᴄʟᴏᴜᴅ ʜᴏsᴛɪɴɢ ✦</b>
 <b>🌐 24/7 ᴊs ᴄʟᴏᴜᴅ ᴅᴇᴘʟᴏʏᴍᴇɴᴛ</b>
@@ -467,7 +473,7 @@ bot.on('callback_query', async (callbackQuery) => {
         return;
     }
     
-    // --- ADMIN CALLBACKS ---
+    // ADMIN CALLBACKS
     if (uid === String(ADMIN_ID)) {
         if (data === 'adm_toggle_maint') {
             settings.maintenance = !settings.maintenance;
@@ -583,7 +589,7 @@ bot.on('callback_query', async (callbackQuery) => {
         }
     }
     
-    // --- File Management Callbacks ---
+    // File Management Callbacks
     if (data.startsWith('viewlog_')) {
         const parts = data.split('_');
         const fName = parts.slice(1, -1).join('_');
@@ -670,7 +676,7 @@ bot.onText(/✦ Deploy JS/, async (msg) => {
     const points = usersDB[uid]?.points || 0;
     const cost = settings.hosting_cost;
     
-    // Force Join Check
+    // FORCE JOIN CHECK FOR DEPLOY
     if (settings.force_join && uid !== String(ADMIN_ID)) {
         const joined = await checkForceJoin(uid);
         if (!joined) {
@@ -697,7 +703,7 @@ bot.onText(/✦ Deploy JS/, async (msg) => {
     });
 });
 
-// --- Process Upload (FIXED) ---
+// --- Process Upload ---
 async function processUpload(msg) {
     const chatId = msg.chat.id;
     const uid = String(msg.from.id);
@@ -706,7 +712,6 @@ async function processUpload(msg) {
         return bot.sendMessage(chatId, errorText('No File', 'Please send a valid file.'), { parse_mode: 'HTML' });
     }
     
-    // Check file size (max 20MB)
     if (msg.document.file_size > 20 * 1024 * 1024) {
         return bot.sendMessage(chatId, errorText('File Too Large', 
             'Maximum file size is 20MB. Please upload a smaller file.'), { parse_mode: 'HTML' });
@@ -718,7 +723,6 @@ async function processUpload(msg) {
     
     console.log(`📥 Upload: ${fileName}`);
     console.log(`📁 Saving to: ${absFilePath}`);
-    console.log(`📊 File ID: ${msg.document.file_id}`);
     
     const validExtensions = ['.js', '.zip'];
     if (!validExtensions.some(ext => fileName.toLowerCase().endsWith(ext))) {
@@ -730,43 +734,47 @@ async function processUpload(msg) {
         `📦 File: ${fileName}\n⏳ Status: Uploading...`, '⚙️'), { parse_mode: 'HTML' });
     
     try {
-        // Get file
-        let file;
-        try {
-            file = await bot.getFile(msg.document.file_id);
-        } catch (error) {
-            console.error('❌ Failed to get file:', error);
-            await bot.editMessageText(errorText('File Error', 
-                'Failed to get file from Telegram. Please upload the file directly (not forwarded).'), {
-                chat_id: chatId,
-                message_id: progMsg.message_id,
-                parse_mode: 'HTML'
-            });
-            return;
-        }
-        
-        // Download file
         let fileContent;
+        
         try {
-            fileContent = await bot.downloadFile(file.file_path);
-        } catch (error) {
-            console.error('❌ Failed to download file:', error);
-            await bot.editMessageText(errorText('Download Error', 
-                'Failed to download file. Please upload the file directly (not forwarded).'), {
-                chat_id: chatId,
-                message_id: progMsg.message_id,
-                parse_mode: 'HTML'
+            const file = await bot.getFile(msg.document.file_id);
+            const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+            console.log(`📥 Downloading from: ${fileUrl}`);
+            
+            fileContent = await new Promise((resolve, reject) => {
+                https.get(fileUrl, (res) => {
+                    if (res.statusCode !== 200) {
+                        reject(new Error(`HTTP ${res.statusCode}`));
+                        return;
+                    }
+                    const chunks = [];
+                    res.on('data', (chunk) => chunks.push(chunk));
+                    res.on('end', () => resolve(Buffer.concat(chunks)));
+                    res.on('error', reject);
+                }).on('error', reject);
             });
-            return;
+        } catch (error) {
+            console.error('❌ HTTPS download failed:', error.message);
+            try {
+                const file = await bot.getFile(msg.document.file_id);
+                fileContent = await bot.downloadFile(file.file_path);
+            } catch (fallbackError) {
+                await bot.editMessageText(errorText('Download Error', 
+                    'Failed to download file. Please try uploading again.'), {
+                    chat_id: chatId,
+                    message_id: progMsg.message_id,
+                    parse_mode: 'HTML'
+                });
+                return;
+            }
         }
         
-        // Save file
         fs.writeFileSync(absFilePath, fileContent);
+        console.log(`✅ File saved: ${absFilePath}`);
         
         let finalPath = absFilePath;
         let finalName = fileName;
         
-        // Handle ZIP files
         if (fileName.endsWith('.zip')) {
             const extractDir = path.join(DEPLOY_DIR, `${uid}_${fileName.replace('.zip', '')}`);
             const absExtractDir = path.resolve(extractDir);
@@ -775,8 +783,8 @@ async function processUpload(msg) {
                 const zip = new AdmZip(absFilePath);
                 zip.extractAllTo(absExtractDir, true);
                 fs.unlinkSync(absFilePath);
+                console.log(`📦 Extracted ZIP to: ${absExtractDir}`);
             } catch (error) {
-                console.error('❌ Failed to extract ZIP:', error);
                 await bot.editMessageText(errorText('Invalid ZIP', 
                     'The file is not a valid ZIP archive.'), {
                     chat_id: chatId,
@@ -804,13 +812,11 @@ async function processUpload(msg) {
                     }
                 };
                 walkDir(absExtractDir);
-            } catch (error) {
-                console.error('❌ Failed to walk directory:', error);
-            }
+            } catch (error) {}
             
             if (hasPy && !mainFile) {
                 await bot.editMessageText(errorText('Wrong Format', 
-                    '❌ This archive contains only Python files!\nThis bot only deploys <b>JavaScript</b> bots.'), {
+                    '❌ This archive contains only Python files!'), {
                     chat_id: chatId,
                     message_id: progMsg.message_id,
                     parse_mode: 'HTML'
@@ -829,7 +835,7 @@ async function processUpload(msg) {
             
             finalPath = path.resolve(mainFile);
             finalName = path.basename(mainFile);
-            console.log(`📦 Extracted: ${finalPath}`);
+            console.log(`📦 Main file: ${finalPath}`);
         }
         
         if (!finalName.endsWith('.js')) {
@@ -852,7 +858,6 @@ async function processUpload(msg) {
             return;
         }
         
-        // Install dependencies
         await bot.editMessageText(premiumText('⏳ Processing...', 
             `📦 Installing Node.js dependencies...`, '⚙️'), {
             chat_id: chatId,
@@ -866,7 +871,6 @@ async function processUpload(msg) {
             bot.sendMessage(chatId, infoText('⚠️ Warning', `Node dependencies: ${result.msg}`), { parse_mode: 'HTML' });
         }
         
-        // Run the bot
         const runResult = await runUserFile(finalPath, parseInt(uid), finalName);
         
         if (runResult.success) {
